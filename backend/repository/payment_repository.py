@@ -122,3 +122,55 @@ async def increment_planner_count(user_id: str) -> None:
         )
     
     logger.info(f"Incremented planner count for user {user_id}")
+
+
+
+
+async def get_user_payment_history(user_id: str) -> list:
+    """
+    Get user's payment transaction history
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        List of payment transactions
+    """
+    pool = get_db_pool()
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT 
+                id, 
+                razorpay_order_id,
+                razorpay_payment_id,
+                razorpay_signature,
+                amount,
+                currency,
+                plan_type,
+                status,
+                created_at,
+                updated_at
+            FROM payment_transactions
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            """,
+            user_id,
+        )
+        
+        transactions = []
+        for row in rows:
+            transactions.append({
+                "id": row["id"],
+                "razorpay_order_id": row["razorpay_order_id"],
+                "razorpay_payment_id": row["razorpay_payment_id"],
+                "amount": row["amount"],
+                "currency": row["currency"],
+                "plan_type": row["plan_type"],
+                "status": row["status"],
+                "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            })
+        
+        return transactions

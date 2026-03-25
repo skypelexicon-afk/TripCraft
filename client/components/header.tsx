@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Luggage, Menu, X, User } from "lucide-react";
+import { Luggage, Menu, X, User, UserCircle } from "lucide-react";
 
 export default function Header() {
   const router = useRouter();
@@ -43,6 +43,7 @@ export default function Header() {
               Compare Destinations
             </Link>
             {user && (
+               <>
               <Link
                 href="/plans"
                 className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
@@ -50,6 +51,14 @@ export default function Header() {
                 <Luggage className="w-4 h-4" />
                 My Plans
               </Link>
+                <Link
+                  href="/profile"
+                  className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <UserCircle className="w-4 h-4" />
+                  Profile
+                </Link>
+              </>
             )}
           </nav>
 
@@ -115,6 +124,7 @@ export default function Header() {
                 Compare Destinations
               </Link>
               {user && (
+                 <>
                 <Link
                   href="/plans"
                   className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
@@ -123,6 +133,15 @@ export default function Header() {
                   <Luggage className="w-4 h-4" />
                   My Plans
                 </Link>
+                  <Link
+                    href="/profile"
+                    className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    <UserCircle className="w-4 h-4" />
+                    Profile
+                  </Link>
+                </>
               )}
             </nav>
 

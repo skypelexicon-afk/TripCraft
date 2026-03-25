@@ -16,6 +16,7 @@ from repository.payment_repository import (
     get_user_planner_status,
     update_user_premium_status,
     increment_planner_count,
+     get_user_payment_history,
 )
 
 router = APIRouter(prefix="/api/payment", tags=["Payment"])
@@ -201,4 +202,74 @@ async def record_planner_creation(user_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to record planner creation: {str(e)}",
+        )
+
+
+
+@router.get(
+    "/history",
+    summary="Get Payment History",
+    description="Get user's payment transaction history",
+)
+async def get_payment_history(user_id: str):
+    """
+    Get user's payment transaction history.
+    
+    Args:
+        user_id: User ID from query parameter
+        
+    Returns:
+        List of payment transactions
+    """
+    try:
+        logger.info(f"Fetching payment history for user: {user_id}")
+        transactions = await get_user_payment_history(user_id)
+        
+        return {
+            "success": True,
+            "transactions": transactions,
+            "total": len(transactions),
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching payment history: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch payment history: {str(e)}",
+        )
+
+
+@router.get(
+    "/user-stats",
+    summary="Get User Stats",
+    description="Get user's planner statistics",
+)
+async def get_user_stats(user_id: str):
+    """
+    Get user's planner statistics.
+    
+    Args:
+        user_id: User ID from query parameter
+        
+    Returns:
+        User's planner statistics
+    """
+    try:
+        logger.info(f"Fetching user stats for user: {user_id}")
+        user_status = await get_user_planner_status(user_id)
+        
+        return {
+            "success": True,
+            "stats": {
+                "has_used_free_planner": user_status.has_used_free_planner,
+                "total_planners_created": user_status.total_planners_created,
+                "is_premium": user_status.is_premium,
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching user stats: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch user stats: {str(e)}",
         )
