@@ -1,6 +1,7 @@
 """
 Groq-based AI Agent System for TripCraft
 Replaces OpenRouter/OpenAI with Groq LLM
+Now with intelligent API key rotation and failover
 """
 
 from groq import Groq
@@ -8,18 +9,20 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 from loguru import logger
+from config.groq_key_manager import get_key_manager
+
 
 class GroqAgent:
-    """Base class for Groq-powered agents"""
-    
+    """Base class for Groq-powered agents with intelligent key rotation"""
+
     def __init__(
         self,
         name: str,
         role: str,
         instructions: List[str],
-      model: str = "llama-3.3-70b-versatile",
+        model: str = "llama-3.3-70b-versatile",
         temperature: float = 0.3,
-          max_tokens: int = 3000
+        max_tokens: int = 3000
     ):
         self.name = name
         self.role = role
@@ -27,52 +30,89 @@ class GroqAgent:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        
+        self.key_manager = get_key_manager()
+        self.max_retries = 4  # Try all 4 keys
+
     def _build_system_prompt(self) -> str:
         """Build system prompt from instructions"""
-        prompt = f"You are {self.name}, a {self.role}."
-        prompt += "INSTRUCTIONS:"
-        prompt += "".join(self.instructions)
+        prompt = f"You are {self.name}, a {self.role}.\n\nINSTRUCTIONS:\n"
+        prompt += "\n".join(self.instructions)
         return prompt
-    
+
     async def arun(self, user_message: str, context: Optional[str] = None) -> str:
-        """Run agent with user message"""
-        try:
-            messages = [
-                {"role": "system", "content": self._build_system_prompt()}
-            ]
-            
-            if context:
-                messages.append({"role": "system", "content": f"CONTEXT:{context}"})
-            
-            messages.append({"role": "user", "content": user_message})
-            
-            logger.info(f"[{self.name}] Processing request with {self.model}")
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
-            
-            content = response.choices[0].message.content
-            logger.info(f"[{self.name}] Response generated successfully")
-            
-            return content
-            
-        except Exception as e:
-            logger.error(f"[{self.name}] Error: {str(e)}")
-            # Try fallback model
-            if self.model == "llama-3.3-70b-versatile":
-                logger.info(f"[{self.name}] Trying fallback model: mixtral-8x7b-32768")
-                self.model = "mixtral-8x7b-32768"
-                return await self.arun(user_message, context)
-            raise
+        """Run agent with user message and automatic key rotation"""
+
+        messages = [
+            {"role": "system", "content": self._build_system_prompt()}
+        ]
+
+        if context:
+            messages.append({"role": "system", "content": f"CONTEXT:\n{context}"})
+
+        messages.append({"role": "user", "content": user_message})
+
+        # Try with key rotation
+        for attempt in range(self.max_retries):
+            try:
+                # Get client with current available key
+                client = self.key_manager.get_client()
+
+                if client is None:
+                    error_response = {
+                        "error": "GROQ_KEYS_EXHAUSTED",
+                        "message": "All Groq API keys have reached quota or are invalid. Please add new keys or wait for cooldown to expire.",
+                        "status": self.key_manager.get_status()
+                    }
+                    logger.error(f"[{self.name}] All Groq API keys exhausted")
+                    raise Exception(json.dumps(error_response))
+
+                current_key = self.key_manager.keys[self.key_manager.current_key_index]
+
+                logger.info(
+                    f"[{self.name}] Processing request with {self.model} (KEY_{self.key_manager.current_key_index + 1})"
+                )
+
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens
+                )
+
+                content = response.choices[0].message.content
+                logger.info(f"[{self.name}] Response generated successfully")
+
+                return content
+
+            except Exception as e:
+                logger.error(f"[{self.name}] Error on attempt {attempt + 1}: {str(e)}")
+
+                # Identify current key
+                current_key = self.key_manager.keys[self.key_manager.current_key_index]
+
+                rotated = self.key_manager.handle_error(e, current_key)
+
+                if not rotated:
+                    # Try fallback model
+                    if self.model == "llama-3.3-70b-versatile":
+                        logger.info(f"[{self.name}] Trying fallback model: mixtral-8x7b-32768")
+                        self.model = "mixtral-8x7b-32768"
+                        continue
+                    raise
+
+                if attempt < self.max_retries - 1:
+                    logger.info(f"[{self.name}] Retrying with next available key...")
+                    continue
+                else:
+                    raise
+
+        raise Exception(f"[{self.name}] Failed after {self.max_retries} attempts")
 
 
-# Destination Agent
+# ===========================================================
+#                     AGENT DEFINITIONS
+# ===========================================================
+
 destination_agent_groq = GroqAgent(
     name="Destination Explorer",
     role="destination research specialist",
@@ -89,7 +129,7 @@ destination_agent_groq = GroqAgent(
     ],
     temperature=0.3
 )
-# Flight Search Agent
+
 flight_agent_groq = GroqAgent(
     name="Flight Search Assistant",
     role="flight search specialist",
@@ -102,7 +142,7 @@ flight_agent_groq = GroqAgent(
     ],
     temperature=0.2
 )
-# Hotel Search Agent
+
 hotel_agent_groq = GroqAgent(
     name="Hotel Search Assistant",
     role="accommodation specialist",
@@ -116,7 +156,6 @@ hotel_agent_groq = GroqAgent(
     temperature=0.3
 )
 
-# Dining Agent
 dining_agent_groq = GroqAgent(
     name="Culinary Guide",
     role="dining specialist",
@@ -130,7 +169,6 @@ dining_agent_groq = GroqAgent(
     temperature=0.3
 )
 
-# Budget Agent
 budget_agent_groq = GroqAgent(
     name="Budget Optimizer",
     role="travel budget specialist",
@@ -143,7 +181,7 @@ budget_agent_groq = GroqAgent(
     ],
     temperature=0.2
 )
-# Itinerary Agent
+
 itinerary_agent_groq = GroqAgent(
     name="Itinerary Planner",
     role="day-by-day itinerary specialist",
@@ -152,19 +190,18 @@ itinerary_agent_groq = GroqAgent(
         "- Each day must have: Day number, Morning activities, Afternoon activities, Evening activities",
         "- Use format: '## Day X' for each day header",
         "- Under each day, use '**Morning:**', '**Afternoon:**', '**Evening:**' sections",
-        "- CRITICAL: Use specific, full place names (e.g., 'Tower Bridge' not 'a bridge', 'Louvre Museum' not 'museum')",
+        "- CRITICAL: Use specific, full place names",
         "- Include specific timing (e.g., 9:00 AM, 2:00 PM)",
         "- Balance activities with rest periods",
         "- Consider travel time between locations",
         "- Add practical tips at the end of each day",
-        "- Keep descriptions concise (2-3 sentences per time slot)",
+        "- Keep descriptions concise",
         "- Ensure place names match those from destination research"
     ],
     temperature=0.3,
     max_tokens=2000
 )
 
-# Product Recommendation Agent (NEW)
 product_agent_groq = GroqAgent(
     name="Travel Essentials Advisor",
     role="travel product recommendation specialist",
@@ -173,17 +210,20 @@ product_agent_groq = GroqAgent(
         "Consider weather, terrain, and cultural requirements",
         "Suggest 6-8 practical items travelers should bring",
         "Include categories: clothing, gadgets, accessories, health & safety",
-        "Provide specific product recommendations (not generic categories)",
-        "Explain why each product is needed for this specific trip",
+        "Provide specific product recommendations",
+        "Explain why each product is needed",
         "Include approximate price ranges",
-        "Prioritize items by importance (must-have vs nice-to-have)",
         "Format with product name, category, reason, and estimated price",
         "Output in JSON format for easy parsing"
     ],
     temperature=0.4,
-     max_tokens=2500
+    max_tokens=2500
 )
 
+
+# ===========================================================
+#            PRODUCT RECOMMENDATION GENERATOR
+# ===========================================================
 
 async def generate_product_recommendations(
     destination: str,
@@ -194,49 +234,45 @@ async def generate_product_recommendations(
     Generate product recommendations for a trip
     Returns list of products with name, category, reason, price
     """
+
     prompt = f"""
     Generate 6-8 essential travel product recommendations for this trip:
-    
+
     Destination: {destination}
     Duration & Budget: {travel_plan[:300]}
     Activities: {activities[:300]}
-    
+
     For each product, provide:
-    - name: Specific product name (e.g., "Waterproof Hiking Boots" not just "shoes")
-    - category: Product category (clothing/gadgets/accessories/health)
-    - reason: Why needed for this trip (max 50 words)
-    - price_range: Estimated price in USD (e.g., "$50-80")
-    - priority: must-have or nice-to-have
-    - search_term: Amazon search keywords
-    
-    Return ONLY valid JSON array format, no other text:
-    [
-        {{"name": "...", "category": "...", "reason": "...", "price_range": "...", "priority": "...", "search_term": "..."}}
-    ]
+    - name
+    - category
+    - reason
+    - price_range
+    - priority
+    - search_term
+
+    Return ONLY valid JSON array.
     """
-    
+
     response = await product_agent_groq.arun(prompt)
-    
-    # Extract JSON from response
+
     try:
-        # Try to find JSON array in response
         start_idx = response.find('[')
         end_idx = response.rfind(']') + 1
+
         if start_idx != -1 and end_idx > start_idx:
             json_str = response[start_idx:end_idx]
             products = json.loads(json_str)
 
-            
-            # Add Amazon URLs to each product
+            # Add Amazon links
             for product in products:
-                search_term = product.get('search_term', product.get('name', ''))
-                # Create Amazon search URL
-                search_query = search_term.replace(' ', '+')
-                product['amazon_url'] = f"https://www.amazon.com/s?k={search_query}"
-            
-            logger.info(f"Successfully generated {len(products)} product recommendations with Amazon links")
+                search_term = product.get("search_term", product.get("name", ""))
+                query = search_term.replace(" ", "+")
+                product["amazon_url"] = f"https://www.amazon.com/s?k={query}"
+
+            logger.info(f"Generated {len(products)} product recommendations")
             return products
+
     except Exception as e:
         logger.error(f"Error parsing product recommendations: {e}")
-    
+
     return []

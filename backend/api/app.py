@@ -10,6 +10,7 @@ from router.products import router as products_router
 from router.comparison import router as comparison_router
 from router.payment import router as payment_router
 from router.auth import router as auth_router
+from router.groq_status import router as groq_status_router
 router = APIRouter(prefix="/api")
 
 
@@ -62,3 +63,4 @@ app.include_router(additional_router)
 app.include_router(products_router)
 app.include_router(comparison_router)
 app.include_router(payment_router)
+app.include_router(groq_status_router)
